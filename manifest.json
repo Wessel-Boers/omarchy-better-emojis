@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "wessel.better-emojis",
+  "name": "Better Emojis",
+  "version": "0.1.0",
+  "author": "wessel",
+  "description": "Emoji picker with category tabs, recents, skin tones, a live preview, and adjustable grid and window sizing. Takes over the built-in Super+Ctrl+E picker.",
+  "kinds": [
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "BetterEmojis.qml"
+  },
+  "omarchy": {
+    "clonedFrom": "omarchy.emojis"
+  }
+}
