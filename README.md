@@ -29,20 +29,20 @@ omarchy plugin remove wessel.better-emojis
   Animals & Nature, Food & Drink, Activities, Travel & Places, Objects,
   Symbols, Flags. Searching always searches every category with multi-word AND
   matching.
-- **Recents** — the last 30 inserted emojis are remembered and available from
+- **Recents** — the last inserted emojis are remembered and available from
   the Recent tab.
 - **Skin tones** — choose a default tone in Settings or show all five exact
-  Unicode tone variants beside each base emoji. The grid never shows duplicate
-  standalone tone variants.
-- **Gender variants** — person, woman, and man variants are combined by default.
-  Enable all gender variants in Settings when you want them shown separately.
+  Unicode tone variants beside each base emoji. Cycle through with a hotkey.
+  The grid never shows duplicate standalone tone variants.
+- **Gender variants** — man, woman, and variants are combined by default. Cycle
+  through with a hotkey or enable all gender variants in Settings when you want them shown separately.
 - **Settings page** — the gear switches the overlay from the emoji grid to a
   dedicated Settings page. The emoji icon returns to the grid.
 - **Preset sizing** — emoji size (Normal / Large / Extra Large), window width
   (Normal / Wide / Extra Wide), and window height (Normal / Tall / Extra Tall).
   Grid columns distribute evenly across the complete overlay width at every size.
-- **Keyboard navigation** — Settings uses group-level navigation: Tab and
-  Shift+Tab move between groups, Up and Down move between groups, and Left and
+- **Keyboard navigation** — Tab to different categories and access the settings menu with a hotkey. Settings itself 
+  uses group-level navigation: Tab and Shift+Tab move between groups, Up and Down move between groups, and Left and
   Right select options within the active group.
 - **Copy mode** — `Ctrl + Enter` copies instead of typing into the focused app.
 - **Theme aware** — uses Omarchy menu tokens, `Button`, `Toggle`, and
@@ -57,25 +57,17 @@ omarchy plugin remove wessel.better-emojis
 | Key | Action |
 | --- | --- |
 | type | Search all categories |
-| `Esc` | Clear search in emoji view; dismiss the overlay from Settings |
-| arrows / PgUp / PgDn | Move the emoji cursor |
 | `Tab` / `Shift + Tab` | Next / previous category tab |
 | `Ctrl + 1` … `Ctrl + 9` | Jump to tab N |
 | `Ctrl + T` | Cycle skin tone |
 | `Ctrl + G` | Cycle displayed gender when genders are combined |
+| `Ctrl + S` or `Ctrl + ,` | Open Settings / return to emojis |
+| arrows / PgUp / PgDn | Move the emoji cursor |
 | `Enter` | Insert selected emoji |
 | `Ctrl + Enter` | Copy selected emoji |
-| `Ctrl + S` | Open Settings / return to emojis |
-| `Ctrl + ,` | Open Settings / return to emojis (alias) |
+| `Esc` | Clear search text in emoji view; dismiss the overlay from Settings |
 
-When Settings is open:
-
-| Key | Action |
-| --- | --- |
-| `Tab` / `Shift + Tab` | Move to the next / previous settings group |
-| `Up` / `Down` | Move between settings groups |
-| `Left` / `Right` | Choose an option in the active group |
-| `Enter` / `Space` | Activate the selected option, toggle, or action |
+Navigate the Settings menu with Tabs or arrows to selected options with the keyboard.
 
 ## Settings
 
