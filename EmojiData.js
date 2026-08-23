@@ -7,7 +7,15 @@ var TONE_MODIFIERS = ["\uD83C\uDFFB", "\uD83C\uDFFC", "\uD83C\uDFFD", "\uD83C\uD
 function parseEmojis(raw) {
   try {
     var data = JSON.parse(String(raw || ""))
-    return Array.isArray(data) ? data : []
+    if (!Array.isArray(data)) return []
+    for (var i = 0; i < data.length; i++) {
+      var it = data[i]
+      if (it) {
+        it._kLower = String(it.k || "").toLowerCase()
+        it._variantsStr = it.v ? JSON.stringify(it.v) : "[]"
+      }
+    }
+    return data
   } catch (e) {
     return []
   }
@@ -18,7 +26,7 @@ function normalizedQuery(query) {
 }
 
 function keywordText(item) {
-  return String((item && item.k) || "").toLowerCase()
+  return (item && item._kLower) ? item._kLower : String((item && item.k) || "").toLowerCase()
 }
 
 // Every whitespace-separated word must appear somewhere in the keywords.
@@ -74,12 +82,22 @@ function toneModifier(tone) {
   return TONE_MODIFIERS[index - 1]
 }
 
-// Append a skin-tone modifier. Trailing VS16 is dropped first so sequences
-// stay valid (e.g. U+270C U+FE0F + tone -> U+270C + tone).
-function applySkinTone(emoji, tone) {
+// Prefer the exact Unicode variant, falling back to appending a modifier for
+// callers without generated variant data.
+function applySkinTone(emoji, tone, variants) {
   var base = String(emoji || "")
   var modifier = toneModifier(tone)
   if (!modifier) return base
+  var values = variants
+  if (typeof values === "string") {
+    try {
+      values = JSON.parse(values)
+    } catch (e) {
+      values = []
+    }
+  }
+  var index = Number(tone) - 1
+  if (Array.isArray(values) && values[index]) return String(values[index])
   if (base.charCodeAt(base.length - 1) === 0xFE0F) base = base.slice(0, -1)
   return base + modifier
 }
@@ -90,12 +108,7 @@ function supportsTone(item) {
 
 // Remove every skin-tone modifier so toned recents can be looked up again.
 function stripTones(emoji) {
-  var out = ""
-  var s = String(emoji || "")
-  for (var i = 0; i < s.length; i++) {
-    if (TONE_MODIFIERS.indexOf(s.charAt(i)) < 0) out += s.charAt(i)
-  }
-  return out
+  return String(emoji || "").replace(/\uD83C[\uDFFB-\uDFFF]/g, "")
 }
 
 // Recents are stored as plain emoji strings (tone already applied).

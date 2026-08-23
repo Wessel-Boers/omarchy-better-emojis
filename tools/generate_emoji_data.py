@@ -7,7 +7,7 @@ Sources (fetched at run time, cached in /tmp):
   - CLDR annotationsDerived.xml  : extra keywords for ZWJ sequences
 
 Output entry shape:
-  {"e": "<emoji>", "k": "<name> keyword1 keyword2 ...", "c": "<category>", "t": true}
+  {"e": "<emoji>", "k": "<name> keyword1 keyword2 ...", "c": "<category>", "t": true, "v": [...]}
 
 `t` marks emojis that accept a single skin-tone modifier (U+1F3FB..U+1F3FF).
 Tone-variant rows themselves are dropped from the grid; they are reached via
@@ -31,6 +31,19 @@ SOURCES = {
 }
 
 MODIFIERS = [chr(c) for c in range(0x1F3FB, 0x1F400)]
+GENDER_MARKERS = {chr(0x1F468): "gm", chr(0x1F469): "gf", chr(0x1F9D1): "gp"}
+GENDER_SIGN_MARKERS = {chr(0x2640): "gf", chr(0x2642): "gm"}
+SPECIAL_GENDER_GROUPS = [
+    {"gp": "\U0001fac4", "gf": "\U0001f930", "gm": "\U0001fac3"},
+    {"gp": "\U0001f9d1\u200d\U0001f384", "gf": "\U0001f936", "gm": "\U0001f385"},
+    {"gp": "\U0001fac5", "gf": "\U0001f478", "gm": "\U0001f934"},
+    {
+        "gp": "\U0001f48f",
+        "gf": "\U0001f469\u200d\u2764\ufe0f\u200d\U0001f48b\u200d\U0001f469",
+        "gm": "\U0001f468\u200d\u2764\ufe0f\u200d\U0001f48b\u200d\U0001f468",
+        "extra": ["\U0001f469\u200d\u2764\ufe0f\u200d\U0001f48b\u200d\U0001f468"],
+    },
+]
 
 
 def fetch(name: str) -> str:
@@ -66,8 +79,40 @@ def parse_test_file(raw: str):
     return entries
 
 
-def strip_modifiers(seq: tuple) -> tuple:
-    return tuple(ch for ch in seq if ch not in MODIFIERS)
+def canonical_key(seq: tuple) -> tuple:
+    return tuple(ch for ch in seq if ch not in MODIFIERS and ch != "\ufe0f")
+
+
+def gender_member(seq: tuple):
+    """Return (group key, member role, base) for a gendered emoji."""
+    if any(ch in MODIFIERS for ch in seq):
+        return None
+    canonical = canonical_key(seq)
+    person_markers = [ch for ch in canonical if ch in GENDER_MARKERS]
+    if len(person_markers) == 1 and not any(ch in GENDER_SIGN_MARKERS for ch in canonical):
+        marker = person_markers[0]
+        return (
+            tuple("{gender}" if ch == marker else ch for ch in canonical),
+            GENDER_MARKERS[marker],
+            None,
+        )
+
+    sign_markers = [ch for ch in canonical if ch in GENDER_SIGN_MARKERS]
+    if len(sign_markers) != 1 or len(canonical) < 2:
+        return None
+    marker_index = canonical.index(sign_markers[0])
+    if marker_index == 0 or canonical[marker_index - 1] != "\u200d":
+        return None
+    marker = sign_markers[0]
+    group_key = tuple(
+        "{gender}" if ch == marker else ch for ch in canonical
+    )
+    base = canonical[:marker_index - 1] + canonical[marker_index + 1:]
+    return (
+        group_key,
+        GENDER_SIGN_MARKERS[marker],
+        base,
+    )
 
 
 def parse_annotations(path: str):
@@ -116,24 +161,55 @@ def build_keywords(name: str, words: list) -> str:
 
 def main() -> int:
     entries = parse_test_file(fetch("emoji-test.txt"))
-    qualified = {seq for seq, _ in entries}
-    primary = {strip_modifiers(seq) for seq in qualified}
+    variants = {}
+    for seq, _ in entries:
+        modifiers = {ch for ch in seq if ch in MODIFIERS}
+        if len(modifiers) != 1:
+            continue
+        modifier = modifiers.pop()
+        variants.setdefault(canonical_key(seq), {})[
+            MODIFIERS.index(modifier) + 1
+        ] = "".join(seq)
+    gender_groups = {}
+    gender_group_for = {}
+    for seq, _ in entries:
+        member = gender_member(seq)
+        if member is None:
+            continue
+        key, role, base = member
+        group = gender_groups.setdefault(key, {})
+        text = "".join(seq)
+        group[role] = text
+        gender_group_for[text] = key
+        gender_group_for["".join(canonical_key(seq))] = key
+        if base is not None:
+            base_text = "".join(base)
+            group["gp"] = base_text
+            gender_group_for[base_text] = key
+    gender_groups = {
+        key: value for key, value in gender_groups.items()
+        if len(value) >= 2
+    }
+    gender_group_for = {
+        text: key for text, key in gender_group_for.items() if key in gender_groups
+    }
+    for index, special in enumerate(SPECIAL_GENDER_GROUPS):
+        if not all(any("".join(seq) == special[role] for seq, _ in entries) for role in ("gp", "gf", "gm")):
+            continue
+        key = ("{special-gender}", str(index))
+        gender_groups[key] = {role: special[role] for role in ("gp", "gf", "gm")}
+        for role in ("gp", "gf", "gm"):
+            gender_group_for[special[role]] = key
+        for text in special.get("extra", []):
+            gender_group_for[text] = key
     ann = parse_annotations("annotations-en.xml")
     derived = parse_annotations("annotationsDerived-en.xml")
 
     out, skipped_variants, missing_kw = [], 0, 0
     for seq, group in entries:
-        norm = strip_modifiers(seq)
         text = "".join(seq)
-        # Drop bare modifiers and any row that is just a toned form of another row.
-        if norm != seq and norm in qualified:
+        if any(ch in MODIFIERS for ch in seq):
             skipped_variants += 1
-            continue
-        if norm != seq and norm not in qualified:
-            # Toned ZWJ sequence without an untoned twin: keep it, but it must
-            # not be reachable through the tone selector twice — mark no tone.
-            pass
-        if all(ch in MODIFIERS for ch in seq):
             continue
 
         name, words = lookup(ann, text)
@@ -149,10 +225,20 @@ def main() -> int:
         item = {"e": text, "k": k, "c": group or "Symbols"}
         if name:
             item["n"] = name
-        if seq in primary and any(
-            seq + (m,) in qualified for m in MODIFIERS
-        ):
+        exact_variants = variants.get(canonical_key(seq), {})
+        if all(tone in exact_variants for tone in range(1, 6)):
             item["t"] = True
+            item["v"] = [exact_variants[tone] for tone in range(1, 6)]
+        gkey = gender_group_for.get(text) or gender_group_for.get("".join(canonical_key(seq)))
+        if gkey in gender_groups:
+            group_members = gender_groups[gkey]
+            item["gg"] = "".join(gkey)
+            if "gp" in group_members:
+                item["gp"] = group_members["gp"]
+            if "gf" in group_members:
+                item["gf"] = group_members["gf"]
+            if "gm" in group_members:
+                item["gm"] = group_members["gm"]
         out.append(item)
 
     OUT.write_text(json_dumps(out), encoding="utf-8")

@@ -29,8 +29,12 @@ Item {
   property var emojiMap: ({})
   property var emojiCategories: []
   property string activeCategory: "all"
-  property int previewIndex: -1
-  property bool settingsOpen: false
+  property bool showSettings: false
+  property int settingsGroup: 0
+  property int settingsOption: 0
+  property var recentAdjectives: ["fun", "cute", "heartwarming", "weird", "random", "silly", "wholesome", "goofy", "cheeky", "sparkly"]
+  property string recentEmptyAdjective: "fun"
+  property int lastRecentAdjectiveIndex: -1
 
   property var settings: defaultSettings()
   property bool settingsLoaded: false
@@ -47,20 +51,28 @@ Item {
   property int contentMargin: Style.spacing.panelPadding
   property int headerHeight: Math.max(Style.space(34), Style.font.title + Style.spacing.controlPaddingY * 2)
   property int tabBarHeight: Style.space(36)
-  property int footerHeight: Style.space(54)
   property int contentSpacing: Style.spacing.md
-  readonly property int cardWidth: Math.min(
-    Math.max(Style.space(Number(settings.cardWidth) || 480), Style.space(320)),
-    panel.width - Style.gapsOut * 2
-  )
-  readonly property int cardHeight: Math.min(
+  readonly property real preferredCellSize: Math.max(Style.space(28), Style.space(Number(settings.cellSize) || 46))
+  readonly property int cardWidthBase: Math.max(Style.space(Number(settings.cardWidth) || 480), Style.space(320))
+  readonly property int cardWidthClamped: Math.max(0, Math.min(cardWidthBase, panel.width - Style.gapsOut * 2))
+  readonly property int cardWidth: {
+    var inset = contentMargin * 2 + Math.max(1, Style.space(2)) * 2
+    var base = cardWidthClamped
+    var avail = base - inset
+    if (avail < preferredCellSize) return base
+    var cols = Math.floor(avail / preferredCellSize)
+    if (cols < 1) cols = 1
+    return Math.max(Style.space(320), cols * preferredCellSize + inset)
+  }
+  readonly property int cardHeight: Math.max(0, Math.min(
     Math.max(Style.space(Number(settings.cardHeight) || 560), Style.space(380)),
     panel.height - Style.gapsOut * 2
-  )
-  readonly property int cellWidth: Math.max(Style.space(28), Style.space(Number(settings.cellSize) || 46))
-  readonly property int cellHeight: cellWidth
-  readonly property int columns: Math.max(1, Math.floor((cardWidth - contentMargin * 2) / cellWidth))
-  readonly property int emojiPixelSize: Math.max(12, Math.round(cellWidth * 0.58))
+  ))
+  readonly property real gridWidth: Math.max(1, cardWidth - contentMargin * 2 - Math.max(1, Style.space(2)) * 2)
+  readonly property int columns: Math.max(1, Math.floor(gridWidth / preferredCellSize))
+  readonly property real cellWidth: preferredCellSize
+  readonly property real cellHeight: preferredCellSize
+  readonly property int emojiPixelSize: Math.max(12, Math.round(preferredCellSize * 0.58))
   readonly property bool searching: filterText.length > 0
   readonly property var tabs: buildTabs()
   readonly property var emojiSizeOptions: [
@@ -80,7 +92,7 @@ Item {
   ]
 
   function defaultSettings() {
-    return { cellSize: 46, cardWidth: 480, cardHeight: 560, skinTone: 0, lastCategory: "all", recents: [] }
+    return { cellSize: 46, cardWidth: 480, cardHeight: 560, skinTone: 0, showAllTones: false, showAllGenders: false, mergeGenders: true, genderMode: 0, showRecents: true, recents: [] }
   }
 
   function mergedSettings(patch) {
@@ -102,7 +114,8 @@ Item {
       "Symbols": "󰋑",
       "Flags": "󰈻"
     }
-    var out = [{ id: "all", icon: "󰀻", label: "All" }, { id: "recent", icon: "󰋚", label: "Recent" }]
+    var out = [{ id: "all", icon: "󰀻", label: "All" }]
+    if (root.settings.showRecents !== false) out.push({ id: "recent", icon: "󰋚", label: "Recent" })
     for (var i = 0; i < root.emojiCategories.length; i++) {
       var c = root.emojiCategories[i]
       out.push({ id: c, icon: icons[c] || "•", label: c })
@@ -122,11 +135,10 @@ Item {
     root.filterText = ""
     root.selectedIndex = 0
     root.cursorActive = true
-    root.settingsOpen = false
-    var saved = String(root.settings.lastCategory || "all")
-    root.activeCategory = root.tabIndexFor(saved) >= 0 ? saved : "all"
-    root.rebuildDisplay()
+    root.showSettings = false
+    root.activeCategory = "all"
     Qt.callLater(function() {
+      root.rebuildDisplay()
       keyCatcher.forceActiveFocus()
       tabBar.positionViewAtIndex(root.tabIndexFor(root.activeCategory), ListView.Contain)
     })
@@ -157,7 +169,7 @@ Item {
     }
     root.emojiMap = map
     root.emojiCategories = EmojiData.categories(root.emojis)
-    if (root.opened) root.rebuildDisplay()
+    if (root.opened) Qt.callLater(function() { root.rebuildDisplay() })
   }
 
   function recentItems() {
@@ -171,30 +183,84 @@ Item {
     return out
   }
 
+  function genderMember(item) {
+    if (!item || !item.gg) return item
+    var mode = Math.max(0, Math.min(2, Number(root.settings.genderMode) || 0))
+    var order = [item.gm, item.gf, item.gp]
+    if (mode === 0) order = [item.gm, item.gf, item.gp]
+    else if (mode === 1) order = [item.gf, item.gm, item.gp]
+    else order = [item.gp, item.gm, item.gf]
+    for (var i = 0; i < order.length; i++) {
+      var candidate = order[i]
+      if (candidate && root.emojiMap[candidate]) return root.emojiMap[candidate]
+    }
+    return item
+  }
+
+  function pickRecentEmptyAdjective() {
+    var list = root.recentAdjectives
+    if (!list || list.length === 0) return
+    var idx
+    do {
+      idx = Math.floor(Math.random() * list.length)
+    } while (list.length > 1 && idx === root.lastRecentAdjectiveIndex)
+    root.lastRecentAdjectiveIndex = idx
+    root.recentEmptyAdjective = list[idx]
+  }
+
+  function displayItems(items) {
+    var out = []
+    var seenGroups = {}
+    for (var i = 0; i < items.length; i++) {
+      var item = root.settings.mergeGenders ? root.genderMember(items[i]) : items[i]
+      if (!item || !item.e) continue
+      if (root.settings.mergeGenders && item.gg) {
+        if (seenGroups[item.gg]) continue
+        seenGroups[item.gg] = true
+      }
+      if (!root.settings.showAllTones || !item.t) {
+        out.push({ item: item, preToned: false })
+        continue
+      }
+      out.push({ item: { e: item.e, n: item.n, k: item.k, c: item.c }, preToned: true })
+      for (var tone = 0; tone < 5; tone++)
+        out.push({ item: { e: item.v[tone], n: item.n, k: item.k, c: item.c }, preToned: true })
+    }
+    return out
+  }
+
   function rebuildDisplay() {
     var out
     if (root.searching) {
-      out = EmojiData.filterEmojis(root.emojis, root.filterText, 3000)
+      out = EmojiData.filterEmojis(root.emojis, root.filterText, 1000)
     } else if (root.activeCategory === "recent") {
       out = recentItems()
     } else {
-      out = EmojiData.filterEmojis(root.emojis, "", 3000, root.activeCategory === "all" ? "" : root.activeCategory)
+      out = EmojiData.filterEmojis(root.emojis, "", 1000, root.activeCategory === "all" ? "" : root.activeCategory)
     }
-    root.filteredEmojis = out
+    var rows = root.displayItems(out)
+    root.filteredEmojis = rows
 
     displayModel.clear()
-    for (var j = 0; j < out.length; j++) {
-      displayModel.append({ emoji: out[j].e, name: out[j].n || "", toneable: !!out[j].t, index: j })
+    for (var j = 0; j < rows.length; j++) {
+      var item = rows[j].item
+      displayModel.append({
+        emoji: item.e,
+        name: item.n || "",
+        toneable: !!item.t,
+        variants: item._variantsStr !== undefined ? item._variantsStr : JSON.stringify(item.v || []),
+        preToned: rows[j].preToned,
+        index: j
+      })
     }
 
     if (displayModel.count === 0) selectedIndex = 0
     else if (selectedIndex >= displayModel.count) selectedIndex = displayModel.count - 1
     else if (selectedIndex < 0) selectedIndex = 0
     cursorActive = displayModel.count > 0
-    previewIndex = displayModel.count > 0 ? selectedIndex : -1
-
     Qt.callLater(function() {
-      if (displayModel.count > 0) resultGrid.positionViewAtIndex(root.selectedIndex, GridView.Contain)
+      if (displayModel.count > 0)
+        resultGrid.positionViewAtIndex(root.selectedIndex, GridView.Contain)
     })
   }
 
@@ -202,7 +268,6 @@ Item {
     if (displayModel.count === 0) return
     selectedIndex = Math.max(0, Math.min(index, displayModel.count - 1))
     cursorActive = true
-    previewIndex = selectedIndex
     resultGrid.positionViewAtIndex(selectedIndex, GridView.Contain)
   }
 
@@ -246,16 +311,13 @@ Item {
     if (root.searching) root.setFilter("")
     if (root.activeCategory === id) return
     root.activeCategory = id
+    if (id === "recent" && recentItems().length === 0) root.pickRecentEmptyAdjective()
     root.selectedIndex = 0
     root.cursorActive = true
     root.rebuildDisplay()
     Qt.callLater(function() {
       tabBar.positionViewAtIndex(root.tabIndexFor(id), ListView.Contain)
     })
-    if (id !== "all" && id !== "recent") {
-      root.settings = root.mergedSettings({ lastCategory: id })
-      root.scheduleSave()
-    }
   }
 
   function selectCategoryOffset(delta) {
@@ -275,13 +337,13 @@ Item {
   function activateIndex(index, copyOnly) {
     if (index < 0 || index >= displayModel.count) return
     var row = displayModel.get(index)
-    root.applySelected(row.emoji, row.toneable, copyOnly === true)
+    root.applySelected(row.emoji, row.toneable, row.variants, row.preToned, copyOnly === true)
   }
 
-  function applySelected(emojiChar, toneable, copyOnly) {
+  function applySelected(emojiChar, toneable, variants, preToned, copyOnly) {
     if (!emojiChar) return
-    var str = (toneable && Number(root.settings.skinTone) > 0)
-      ? EmojiData.applySkinTone(emojiChar, root.settings.skinTone)
+    var str = (!preToned && toneable && Number(root.settings.skinTone) > 0)
+      ? EmojiData.applySkinTone(emojiChar, root.settings.skinTone, variants)
       : emojiChar
     root.settings = root.mergedSettings({ recents: EmojiData.pushRecent(root.settings.recents, str, 30) })
     root.scheduleSave()
@@ -298,6 +360,7 @@ Item {
     patch[key] = value
     root.settings = root.mergedSettings(patch)
     root.scheduleSave()
+    if (key === "showAllTones" || key === "mergeGenders" || key === "genderMode") root.rebuildDisplay()
   }
 
   function snapToOption(value, options) {
@@ -318,14 +381,90 @@ Item {
     root.setSkinTone((Number(root.settings.skinTone) + delta + 6) % 6)
   }
 
+  function cycleGender() {
+    if (!root.settings.mergeGenders) return
+    root.applySetting("genderMode", (Number(root.settings.genderMode) + 1) % 3)
+    root.rebuildDisplay()
+  }
+
   function clearRecents() {
     root.settings = root.mergedSettings({ recents: [] })
     root.scheduleSave()
-    if (root.activeCategory === "recent") root.rebuildDisplay()
+    if (root.activeCategory === "recent") {
+      root.pickRecentEmptyAdjective()
+      root.rebuildDisplay()
+    }
   }
 
   function toggleSettings() {
-    root.settingsOpen = !root.settingsOpen
+    root.showSettings = !root.showSettings
+    Qt.callLater(function() {
+      if (root.showSettings) {
+        root.settingsGroup = 0
+        root.settingsOption = root.settingsOptionIndex(0)
+      }
+      keyCatcher.forceActiveFocus()
+    })
+  }
+
+  function settingsOptionCount(group) {
+    if (group === 0) return root.emojiSizeOptions.length
+    if (group === 1) return root.cardWidthOptions.length
+    if (group === 2) return root.cardHeightOptions.length
+    if (group === 3) return 6
+    return 1
+  }
+
+  function settingsOptionIndex(group) {
+    var value = group === 0 ? Number(root.settings.cellSize)
+      : (group === 1 ? Number(root.settings.cardWidth)
+      : (group === 2 ? Number(root.settings.cardHeight) : Number(root.settings.skinTone)))
+    var options = group === 0 ? root.emojiSizeOptions
+      : (group === 1 ? root.cardWidthOptions : root.cardHeightOptions)
+    if (group === 3) return Math.max(0, Math.min(5, value))
+    if (!options || !options.length) return 0
+    for (var i = 0; i < options.length; i++) if (options[i].value === value) return i
+    return 0
+  }
+
+  function selectSettingsGroup(delta) {
+    var total = root.settings.showRecents === false ? 7 : 8
+    var next = root.settingsGroup
+    for (var step = 0; step < total; step++) {
+      next = (next + delta + total) % total
+      if (next === 7 && root.settings.showRecents === false) continue
+      break
+    }
+    root.settingsGroup = next
+    root.settingsOption = root.settingsOptionIndex(root.settingsGroup)
+  }
+
+  function selectSettingsOption(delta) {
+    var count = root.settingsOptionCount(root.settingsGroup)
+    if (count <= 1) return
+    root.settingsOption = (root.settingsOption + delta + count) % count
+    if (root.settingsGroup === 0) root.applySetting("cellSize", root.emojiSizeOptions[root.settingsOption].value)
+    else if (root.settingsGroup === 1) root.applySetting("cardWidth", root.cardWidthOptions[root.settingsOption].value)
+    else if (root.settingsGroup === 2) root.applySetting("cardHeight", root.cardHeightOptions[root.settingsOption].value)
+    else if (root.settingsGroup === 3) root.setSkinTone(root.settingsOption)
+  }
+
+  function activateSettingsGroup() {
+    if (root.settingsGroup === 4) root.applySetting("showAllTones", !root.settings.showAllTones)
+    else if (root.settingsGroup === 5) {
+      var showAll = !root.settings.showAllGenders
+      root.settings = root.mergedSettings({ showAllGenders: showAll, mergeGenders: !showAll })
+      root.scheduleSave()
+      root.rebuildDisplay()
+    } else if (root.settingsGroup === 6) {
+      var showRecents = !root.settings.showRecents
+      root.settings = root.mergedSettings({ showRecents: showRecents })
+      root.scheduleSave()
+      if (!showRecents && root.activeCategory === "recent") root.activeCategory = "all"
+      root.rebuildDisplay()
+    } else if (root.settingsGroup === 7) {
+      if (root.settings.showRecents !== false) root.clearRecents()
+    } else root.selectSettingsOption(0)
   }
 
   function loadSettings(raw) {
@@ -338,7 +477,16 @@ Item {
         if (isFinite(Number(parsed.cardWidth))) base.cardWidth = root.snapToOption(Math.max(320, Math.min(900, Number(parsed.cardWidth))), root.cardWidthOptions)
         if (isFinite(Number(parsed.cardHeight))) base.cardHeight = root.snapToOption(Math.max(380, Math.min(1100, Number(parsed.cardHeight))), root.cardHeightOptions)
         if (isFinite(Number(parsed.skinTone))) base.skinTone = Math.max(0, Math.min(5, Number(parsed.skinTone)))
-        if (typeof parsed.lastCategory === "string") base.lastCategory = parsed.lastCategory
+        if (typeof parsed.showAllTones === "boolean") base.showAllTones = parsed.showAllTones
+        if (typeof parsed.showAllGenders === "boolean") {
+          base.showAllGenders = parsed.showAllGenders
+          base.mergeGenders = !parsed.showAllGenders
+        } else if (parsed.mergeGenders === true) {
+          base.mergeGenders = true
+          base.showAllGenders = false
+        }
+        if (typeof parsed.showRecents === "boolean") base.showRecents = parsed.showRecents
+        if (isFinite(Number(parsed.genderMode))) base.genderMode = Math.max(0, Math.min(2, Math.floor(Number(parsed.genderMode))))
         if (Array.isArray(parsed.recents)) {
           base.recents = parsed.recents.filter(function(e) { return typeof e === "string" && e.length > 0 }).slice(0, 30)
         }
@@ -396,26 +544,50 @@ Item {
 
   PanelWindow {
     id: panel
-    visible: root.opened
+    visible: true
     anchors { top: true; bottom: true; left: true; right: true }
     color: "transparent"
     WlrLayershell.namespace: "omarchy-emojis"
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    WlrLayershell.keyboardFocus: root.opened ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
     exclusionMode: ExclusionMode.Ignore
+    mask: Region {
+      width: root.opened ? panel.width : 0
+      height: root.opened ? panel.height : 0
+    }
+
+    Shortcut {
+      sequence: "Ctrl+S"
+      enabled: root.opened
+      onActivated: root.toggleSettings()
+    }
+
+    Shortcut {
+      sequence: "Ctrl+,"
+      enabled: root.opened
+      onActivated: root.toggleSettings()
+    }
+
+    Shortcut {
+      sequence: "Esc"
+      enabled: root.opened && root.showSettings
+      onActivated: root.dismiss()
+    }
 
     Rectangle {
       anchors.fill: parent
-      color: root.scrim
+      color: root.opened ? root.scrim : "transparent"
     }
 
     MouseArea {
       anchors.fill: parent
+      enabled: root.opened
       onClicked: root.dismiss()
     }
 
     BorderSurface {
       id: card
+      visible: root.opened
       width: root.cardWidth
       height: root.cardHeight
       radius: root.cornerRadius
@@ -434,11 +606,11 @@ Item {
         Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) {
           if (event.key === Qt.Key_Escape) {
-            if (root.settingsOpen) root.settingsOpen = false
+            if (root.showSettings) root.dismiss()
             else if (root.filterText) root.setFilter("")
             else root.dismiss()
             event.accepted = true
-          } else if ((event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) && (event.modifiers & Qt.ControlModifier) === 0) {
+          } else if (!root.showSettings && (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) && (event.modifiers & Qt.ControlModifier) === 0) {
             root.selectCategoryOffset(event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier) ? -1 : 1)
             event.accepted = true
           } else if ((event.modifiers & Qt.ControlModifier) && event.key >= Qt.Key_1 && event.key <= Qt.Key_9) {
@@ -447,8 +619,31 @@ Item {
           } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_T) {
             root.cycleSkinTone(1)
             event.accepted = true
-          } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_Comma) {
+          } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_G) {
+            root.cycleGender()
+            event.accepted = true
+          } else if ((event.modifiers & Qt.ControlModifier) && (event.key === Qt.Key_S || event.key === Qt.Key_Comma)) {
             root.toggleSettings()
+            event.accepted = true
+          } else if (root.showSettings && (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)) {
+            root.selectSettingsGroup(event.key === Qt.Key_Backtab ? -1 : 1)
+            event.accepted = true
+          } else if (root.showSettings && event.key === Qt.Key_Up) {
+            root.selectSettingsGroup(-1)
+            event.accepted = true
+          } else if (root.showSettings && event.key === Qt.Key_Down) {
+            root.selectSettingsGroup(1)
+            event.accepted = true
+          } else if (root.showSettings && event.key === Qt.Key_Left) {
+            root.selectSettingsOption(-1)
+            event.accepted = true
+          } else if (root.showSettings && event.key === Qt.Key_Right) {
+            root.selectSettingsOption(1)
+            event.accepted = true
+          } else if (root.showSettings && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space)) {
+            root.activateSettingsGroup()
+            event.accepted = true
+          } else if (root.showSettings) {
             event.accepted = true
           } else if (Util.editsFilter(event, root.filterText)) {
             root.setFilter(Util.editedFilter(event, root.filterText))
@@ -500,9 +695,9 @@ Item {
             anchors.right: gearButton.left
             anchors.rightMargin: Style.space(8)
             anchors.verticalCenter: parent.verticalCenter
-            text: root.filterText || "Search emojis…"
+            text: root.showSettings ? "Settings" : (root.filterText || "Search emojis…")
             color: root.foreground
-            opacity: root.filterText ? 1 : 0.58
+            opacity: root.showSettings ? 1 : (root.filterText ? 1 : 0.58)
             font.family: root.fontFamily
             font.pixelSize: Style.font.heading
             elide: Text.ElideRight
@@ -515,13 +710,13 @@ Item {
             width: Style.space(32)
             height: Style.space(32)
             radius: root.cornerRadius
-            color: gearArea.containsMouse || root.settingsOpen ? root.selectedBackground : "transparent"
+            color: gearArea.containsMouse ? root.selectedBackground : "transparent"
 
             Text {
               anchors.centerIn: parent
-              text: "󰒓"
-              color: root.settingsOpen ? root.selectedText : root.foreground
-              opacity: root.settingsOpen ? 1 : 0.7
+              text: root.showSettings ? "󰱨" : "󰒓"
+              color: root.foreground
+              opacity: gearArea.containsMouse ? 1 : 0.7
               font.family: root.fontFamily
               font.pixelSize: Math.round(Style.font.heading * 1.25)
             }
@@ -538,6 +733,7 @@ Item {
 
         ListView {
           id: tabBar
+          visible: !root.showSettings
           width: parent.width
           height: root.tabBarHeight
           orientation: ListView.Horizontal
@@ -595,8 +791,10 @@ Item {
         }
 
         Item {
+          id: gridArea
+          visible: !root.showSettings
           width: parent.width
-          height: parent.height - root.headerHeight - root.tabBarHeight - root.footerHeight - root.contentSpacing * 3
+          height: parent.height - root.headerHeight - root.tabBarHeight - root.contentSpacing * 2
 
           GridView {
             id: resultGrid
@@ -613,6 +811,8 @@ Item {
               required property string emoji
               required property string name
               required property bool toneable
+              required property string variants
+              required property bool preToned
 
               readonly property bool hasCursor: root.cursorActive && index === root.selectedIndex
 
@@ -623,10 +823,10 @@ Item {
 
               Text {
                 text: {
-                  if (!parent.toneable || Number(root.settings.skinTone) === 0) return parent.emoji
-                  return EmojiData.applySkinTone(parent.emoji, root.settings.skinTone)
+                  if (parent.preToned || !parent.toneable || Number(root.settings.skinTone) === 0) return parent.emoji
+                  return EmojiData.applySkinTone(parent.emoji, root.settings.skinTone, parent.variants)
                 }
-                font.family: root.fontFamily
+                font.family: "Noto Color Emoji"
                 font.pixelSize: root.emojiPixelSize
                 anchors.centerIn: parent
                 horizontalAlignment: Text.AlignHCenter
@@ -641,12 +841,10 @@ Item {
                 onContainsMouseChanged: if (containsMouse) {
                   root.cursorActive = true
                   root.selectedIndex = index
-                  root.previewIndex = index
                 }
                 onClicked: {
                   root.cursorActive = true
                   root.selectedIndex = index
-                  root.previewIndex = index
                   root.activateIndex(index, false)
                 }
               }
@@ -654,11 +852,13 @@ Item {
           }
 
           Column {
-            anchors.centerIn: parent
+            width: parent.width
+            anchors.verticalCenter: parent.verticalCenter
             spacing: Style.space(8)
             visible: displayModel.count === 0
 
             Text {
+              visible: !(root.activeCategory === "recent" && !root.searching)
               text: "󰈉"
               color: root.selectedText
               opacity: 0.8
@@ -671,143 +871,31 @@ Item {
             Text {
               text: root.searching
                 ? "No matches for “" + root.filterText + "”"
-                : (root.activeCategory === "recent" ? "No recent emojis yet" : "Nothing here")
+                : (root.activeCategory === "recent" ? "No recent emojis yet.\nGo send someone a " + root.recentEmptyAdjective + " emoji!" : "Nothing here")
               color: root.foreground
               opacity: 0.7
               font.family: root.fontFamily
               font.pixelSize: Style.font.title
               horizontalAlignment: Text.AlignHCenter
               width: parent.width
+              wrapMode: Text.WordWrap
             }
           }
         }
 
-        Item {
-          id: footer
+        Flickable {
+          id: settingsPage
+          visible: root.showSettings
           width: parent.width
-          height: root.footerHeight
+          height: parent.height - root.headerHeight - root.contentSpacing
+          contentWidth: width
+          contentHeight: settingsContent.implicitHeight
+          clip: true
 
-          Rectangle {
-            anchors.top: parent.top
-            anchors.left: parent.left
-            anchors.right: parent.right
-            height: 1
-            color: root.border
-            opacity: 0.4
-          }
-
-          Row {
-            anchors.left: parent.left
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: Style.space(10)
-
-            Text {
-              id: previewGlyph
-              anchors.verticalCenter: parent.verticalCenter
-              property var previewItem: root.previewIndex >= 0 && root.previewIndex < displayModel.count
-                ? displayModel.get(root.previewIndex) : null
-              text: {
-                if (!previewItem) return "·"
-                if (previewItem.toneable && Number(root.settings.skinTone) > 0)
-                  return EmojiData.applySkinTone(previewItem.emoji, root.settings.skinTone)
-                return previewItem.emoji
-              }
-              color: root.foreground
-              font.family: root.fontFamily
-              font.pixelSize: Math.max(24, Math.round(root.emojiPixelSize * 1.35))
-            }
-
-            Column {
-              anchors.verticalCenter: parent.verticalCenter
-              spacing: 0
-
-              Text {
-                text: {
-                  var item = root.previewIndex >= 0 && root.previewIndex < displayModel.count
-                    ? displayModel.get(root.previewIndex) : null
-                  if (!item || !item.name) return ""
-                  return item.name.charAt(0).toUpperCase() + item.name.slice(1)
-                }
-                color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.bodySmall
-                elide: Text.ElideRight
-                width: Math.min(Style.space(220), footer.width / 2)
-              }
-
-              Text {
-                text: Number(root.settings.skinTone) > 0 ? "Skin tone " + root.settings.skinTone + " · Ctrl+T" : "Default tone · Ctrl+T"
-                color: root.foreground
-                opacity: 0.55
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-              }
-            }
-          }
-
-          Row {
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: Style.space(4)
-
-            Repeater {
-              model: ["✋", "✋🏻", "✋🏼", "✋🏽", "✋🏾", "✋🏿"]
-
-              delegate: Rectangle {
-                id: toneChip
-                required property int index
-                required property string modelData
-
-                readonly property bool isActive: Number(root.settings.skinTone) === index
-
-                width: Style.space(30)
-                height: Style.space(30)
-                radius: width / 2
-                color: isActive ? root.selectedBackground : (toneArea.containsMouse ? root.selectedBackground : "transparent")
-                opacity: isActive ? 1 : (toneArea.containsMouse ? 0.85 : 0.75)
-
-                Text {
-                  anchors.centerIn: parent
-                  text: toneChip.modelData
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                }
-
-                MouseArea {
-                  id: toneArea
-                  anchors.fill: parent
-                  hoverEnabled: true
-                  cursorShape: Qt.PointingHandCursor
-                  onClicked: root.setSkinTone(toneChip.index)
-                }
-              }
-            }
-          }
-        }
-      }
-
-      Rectangle {
-        id: settingsPanel
-        visible: root.settingsOpen
-        z: 20
-        anchors.top: parent.top
-        anchors.topMargin: card.contentTopInset + root.headerHeight + root.contentSpacing
-        anchors.right: parent.right
-        anchors.rightMargin: card.contentRightInset
-        width: Style.space(280)
-        height: settingsColumn.implicitHeight + Style.space(24)
-        radius: root.cornerRadius
-        color: root.background
-        border.color: root.border
-        border.width: Math.max(1, Style.space(1))
-
-        MouseArea { anchors.fill: parent; onClicked: {} }
-
-        Column {
-          id: settingsColumn
-          anchors.fill: parent
-          anchors.margins: Style.space(12)
-          spacing: Style.space(12)
+          Column {
+            id: settingsContent
+            width: parent.width
+            spacing: Style.space(12)
 
           PanelSectionHeader {
             text: "EMOJI SIZE"
@@ -827,6 +915,7 @@ Item {
 
               Button {
                 required property var modelData
+                required property int index
 
                 width: sizeRow.cellWidth
                 text: modelData.label
@@ -836,6 +925,7 @@ Item {
                 horizontalPadding: Style.spacing.controlPaddingX
                 verticalPadding: Style.spacing.controlPaddingY + Style.space(2)
                 bordered: true
+                focusable: false
                 active: Number(root.settings.cellSize) === modelData.value
                 onClicked: root.applySetting("cellSize", modelData.value)
               }
@@ -860,6 +950,7 @@ Item {
 
               Button {
                 required property var modelData
+                required property int index
 
                 width: widthRow.cellWidth
                 text: modelData.label
@@ -869,6 +960,7 @@ Item {
                 horizontalPadding: Style.spacing.controlPaddingX
                 verticalPadding: Style.spacing.controlPaddingY + Style.space(2)
                 bordered: true
+                focusable: false
                 active: Number(root.settings.cardWidth) === modelData.value
                 onClicked: root.applySetting("cardWidth", modelData.value)
               }
@@ -893,6 +985,7 @@ Item {
 
               Button {
                 required property var modelData
+                required property int index
 
                 width: heightRow.cellWidth
                 text: modelData.label
@@ -902,6 +995,7 @@ Item {
                 horizontalPadding: Style.spacing.controlPaddingX
                 verticalPadding: Style.spacing.controlPaddingY + Style.space(2)
                 bordered: true
+                focusable: false
                 active: Number(root.settings.cardHeight) === modelData.value
                 onClicked: root.applySetting("cardHeight", modelData.value)
               }
@@ -910,9 +1004,128 @@ Item {
 
           PanelSeparator {
             foreground: root.foreground
+            strength: 0.3
+          }
+
+          PanelSectionHeader {
+            text: "SKIN TONES"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+          }
+
+          Row {
+            id: toneRow
+            width: parent.width
+            spacing: Style.space(6)
+            readonly property real cellWidth: (width - spacing * 5) / 6
+
+            Repeater {
+              model: ["✋", "✋🏻", "✋🏼", "✋🏽", "✋🏾", "✋🏿"]
+              Button {
+                required property int index
+                required property string modelData
+                width: toneRow.cellWidth
+                text: modelData
+                fontSize: Style.font.title
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                horizontalPadding: 0
+                verticalPadding: Style.spacing.controlPaddingY + Style.space(2)
+                bordered: true
+                focusable: false
+                active: Number(root.settings.skinTone) === index
+                onClicked: root.setSkinTone(index)
+              }
+            }
+          }
+
+          Toggle {
+            width: parent.width
+            activeFocusOnTab: false
+            hasCursor: root.showSettings && root.settingsGroup === 4
+            titleSize: Style.font.caption
+            label: "Show all skin tones in emoji grid"
+            description: ""
+            checked: !!root.settings.showAllTones
+            onClicked: root.applySetting("showAllTones", !root.settings.showAllTones)
+          }
+
+          Text {
+            visible: !root.settings.showAllTones
+            text: "Ctrl+T cycles the default tone"
+            color: root.foreground
+            opacity: 0.6
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          PanelSeparator {
+            foreground: root.foreground
+            strength: 0.3
+          }
+
+          PanelSectionHeader {
+            text: "GENDERS"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+          }
+
+          Toggle {
+            width: parent.width
+            activeFocusOnTab: false
+            hasCursor: root.showSettings && root.settingsGroup === 5
+            titleSize: Style.font.caption
+            label: "Show all genders in emoji grid"
+            description: ""
+            checked: !!root.settings.showAllGenders
+            onClicked: {
+              var showAll = !root.settings.showAllGenders
+              root.settings = root.mergedSettings({ showAllGenders: showAll, mergeGenders: !showAll })
+              root.scheduleSave()
+              root.rebuildDisplay()
+            }
+          }
+
+          Text {
+            visible: !!root.settings.mergeGenders
+            text: "Hotkey Ctrl+G swaps the gender · active: " + ["male", "female", "person"][Math.max(0, Math.min(2, Number(root.settings.genderMode) || 0))]
+            color: root.foreground
+            opacity: 0.6
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          PanelSeparator {
+            foreground: root.foreground
+            strength: 0.3
+          }
+
+          PanelSectionHeader {
+            text: "RECENTS"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+          }
+
+          Toggle {
+            width: parent.width
+            activeFocusOnTab: false
+            hasCursor: root.showSettings && root.settingsGroup === 6
+            titleSize: Style.font.caption
+            label: "Show Recent tab"
+            description: ""
+            checked: !!root.settings.showRecents
+            onClicked: {
+              var show = !root.settings.showRecents
+              root.settings = root.mergedSettings({ showRecents: show })
+              root.scheduleSave()
+              if (!show && root.activeCategory === "recent") root.activeCategory = "all"
+              root.rebuildDisplay()
+            }
           }
 
           Button {
+            visible: !!root.settings.showRecents
+            hasCursor: root.showSettings && root.settingsGroup === 7
             width: parent.width
             text: "Clear recent emojis"
             fontSize: Style.font.caption
@@ -921,10 +1134,12 @@ Item {
             horizontalPadding: Style.spacing.controlPaddingX
             verticalPadding: Style.spacing.controlPaddingY + Style.space(2)
             bordered: true
+            focusable: false
             onClicked: root.clearRecents()
           }
         }
       }
     }
   }
+}
 }
