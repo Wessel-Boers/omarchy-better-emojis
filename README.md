@@ -1,10 +1,12 @@
 # Better Emojis for Omarchy
 
 A drop-in replacement for the built-in Omarchy emoji picker (`Super + Ctrl + E`)
-with category tabs, recents, skin tones, gender variants, and adjustable sizing,
-designed for keyboard-first use in the Omarchy shell.
+with category tabs, recents, skin tones, gender variants, and adjustable sizing.
+Designed to adhere to Omarchy conventions — fully keyboard-accessible, Nerd
+Fonts icons for categories, and instant open/close with no lag.
 
-![preview](.assets/preview.png)
+![emoji grid](screenshots/picture/emoji-grid.png)
+![settings](screenshots/picture/settings.png)
 
 ## Install
 
@@ -82,7 +84,7 @@ Settings persist in
 (deliberately outside the plugin folder so `omarchy plugin update` stays a clean
 fast-forward): emoji size, window width/height, chosen skin tone, recent
 emojis, skin-tone display, gender display mode and visibility. The picker
-always opens on All.
+remembers the last open category, including All and Recent.
 
 Settings include:
 

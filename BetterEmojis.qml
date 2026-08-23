@@ -92,7 +92,7 @@ Item {
   ]
 
   function defaultSettings() {
-    return { cellSize: 46, cardWidth: 480, cardHeight: 560, skinTone: 0, showAllTones: false, showAllGenders: false, mergeGenders: true, genderMode: 0, showRecents: true, recents: [] }
+    return { cellSize: 46, cardWidth: 480, cardHeight: 560, skinTone: 0, showAllTones: false, showAllGenders: false, mergeGenders: true, genderMode: 0, showRecents: true, lastCategory: "all", recents: [] }
   }
 
   function mergedSettings(patch) {
@@ -136,7 +136,11 @@ Item {
     root.selectedIndex = 0
     root.cursorActive = true
     root.showSettings = false
-    root.activeCategory = "all"
+    var saved = String(root.settings.lastCategory || "all")
+    var lc = saved.toLowerCase()
+    if (lc === "all" || lc === "recent") saved = lc
+    if (saved === "recent" && root.settings.showRecents === false) saved = "all"
+    root.activeCategory = root.tabIndexFor(saved) >= 0 ? saved : "all"
     Qt.callLater(function() {
       root.rebuildDisplay()
       keyCatcher.forceActiveFocus()
@@ -318,6 +322,8 @@ Item {
     Qt.callLater(function() {
       tabBar.positionViewAtIndex(root.tabIndexFor(id), ListView.Contain)
     })
+    root.settings = root.mergedSettings({ lastCategory: id })
+    root.scheduleSave()
   }
 
   function selectCategoryOffset(delta) {
@@ -402,6 +408,7 @@ Item {
       if (root.showSettings) {
         root.settingsGroup = 0
         root.settingsOption = root.settingsOptionIndex(0)
+        root.ensureSettingsVisible()
       }
       keyCatcher.forceActiveFocus()
     })
@@ -437,6 +444,32 @@ Item {
     }
     root.settingsGroup = next
     root.settingsOption = root.settingsOptionIndex(root.settingsGroup)
+    Qt.callLater(root.ensureSettingsVisible)
+  }
+
+  function ensureSettingsVisible() {
+    if (!root.showSettings) return
+    var item = null
+    if (root.settingsGroup === 0) item = sizeRow
+    else if (root.settingsGroup === 1) item = widthRow
+    else if (root.settingsGroup === 2) item = heightRow
+    else if (root.settingsGroup === 3) item = toneRow
+    else if (root.settingsGroup === 4) item = skinToneColumn
+    else if (root.settingsGroup === 5) item = genderColumn
+    else if (root.settingsGroup === 6) item = recentsRow
+    else if (root.settingsGroup === 7) item = clearButton
+    if (!item || !settingsPage) return
+    var top = settingsPage.contentY
+    var bottom = top + settingsPage.height
+    var y = item.y
+    var h = item.height
+    var margin = Style.space(8)
+    if (y < top + margin) {
+      settingsPage.contentY = Math.max(0, y - margin)
+    } else if (y + h > bottom - margin) {
+      var maxY = Math.max(0, settingsPage.contentHeight - settingsPage.height)
+      settingsPage.contentY = Math.min(maxY, y + h - settingsPage.height + margin)
+    }
   }
 
   function selectSettingsOption(delta) {
@@ -487,6 +520,11 @@ Item {
         }
         if (typeof parsed.showRecents === "boolean") base.showRecents = parsed.showRecents
         if (isFinite(Number(parsed.genderMode))) base.genderMode = Math.max(0, Math.min(2, Math.floor(Number(parsed.genderMode))))
+        if (typeof parsed.lastCategory === "string") {
+          var lc = parsed.lastCategory.toLowerCase()
+          if (lc === "all" || lc === "recent") base.lastCategory = lc
+          else base.lastCategory = parsed.lastCategory
+        }
         if (Array.isArray(parsed.recents)) {
           base.recents = parsed.recents.filter(function(e) { return typeof e === "string" && e.length > 0 }).slice(0, 30)
         }
@@ -667,7 +705,7 @@ Item {
             root.selectPage(1)
             event.accepted = true
           } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-            if (root.cursorActive) root.activateIndex(root.selectedIndex, event.modifiers & Qt.ControlModifier)
+            if (root.cursorActive) root.activateIndex(root.selectedIndex, !!(event.modifiers & Qt.ControlModifier))
             else if (displayModel.count > 0) root.cursorActive = true
             event.accepted = true
           } else if (event.text && event.text.length === 1 && event.text.charCodeAt(0) >= 32 && event.text.charCodeAt(0) !== 127) {
@@ -741,6 +779,22 @@ Item {
           spacing: Style.space(4)
           clip: true
           boundsBehavior: Flickable.StopAtBounds
+
+          WheelHandler {
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            onWheel: function(event) {
+              var dy = event.angleDelta.y !== 0 ? event.angleDelta.y : event.pixelDelta.y
+              var dx = event.angleDelta.x !== 0 ? event.angleDelta.x : event.pixelDelta.x
+              var delta = dy !== 0 ? dy : dx
+              if (delta === 0) return
+              event.accepted = true
+              var next = tabBar.contentX - delta
+              var maxX = Math.max(0, tabBar.contentWidth - tabBar.width)
+              if (next < 0) next = 0
+              else if (next > maxX) next = maxX
+              tabBar.contentX = next
+            }
+          }
 
           delegate: Rectangle {
             id: chip
@@ -855,7 +909,7 @@ Item {
             width: parent.width
             anchors.verticalCenter: parent.verticalCenter
             spacing: Style.space(8)
-            visible: displayModel.count === 0
+            visible: displayModel.count === 0 && (root.searching || root.activeCategory === "recent")
 
             Text {
               visible: !(root.activeCategory === "recent" && !root.searching)
@@ -871,7 +925,7 @@ Item {
             Text {
               text: root.searching
                 ? "No matches for “" + root.filterText + "”"
-                : (root.activeCategory === "recent" ? "No recent emojis yet.\nGo send someone a " + root.recentEmptyAdjective + " emoji!" : "Nothing here")
+                : (root.activeCategory === "recent" ? "No recent emojis yet.\nGo send someone a " + root.recentEmptyAdjective + " emoji!" : "")
               color: root.foreground
               opacity: 0.7
               font.family: root.fontFamily
@@ -891,6 +945,11 @@ Item {
           contentWidth: width
           contentHeight: settingsContent.implicitHeight
           clip: true
+          boundsBehavior: Flickable.StopAtBounds
+          boundsMovement: Flickable.StopAtBounds
+          Behavior on contentY {
+            SmoothedAnimation { duration: 150; velocity: 800 }
+          }
 
           Column {
             id: settingsContent
@@ -926,6 +985,7 @@ Item {
                 verticalPadding: Style.spacing.controlPaddingY + Style.space(2)
                 bordered: true
                 focusable: false
+                hasCursor: root.showSettings && root.settingsGroup === 0 && root.settingsOption === index
                 active: Number(root.settings.cellSize) === modelData.value
                 onClicked: root.applySetting("cellSize", modelData.value)
               }
@@ -961,6 +1021,7 @@ Item {
                 verticalPadding: Style.spacing.controlPaddingY + Style.space(2)
                 bordered: true
                 focusable: false
+                hasCursor: root.showSettings && root.settingsGroup === 1 && root.settingsOption === index
                 active: Number(root.settings.cardWidth) === modelData.value
                 onClicked: root.applySetting("cardWidth", modelData.value)
               }
@@ -996,6 +1057,7 @@ Item {
                 verticalPadding: Style.spacing.controlPaddingY + Style.space(2)
                 bordered: true
                 focusable: false
+                hasCursor: root.showSettings && root.settingsGroup === 2 && root.settingsOption === index
                 active: Number(root.settings.cardHeight) === modelData.value
                 onClicked: root.applySetting("cardHeight", modelData.value)
               }
@@ -1033,30 +1095,57 @@ Item {
                 verticalPadding: Style.spacing.controlPaddingY + Style.space(2)
                 bordered: true
                 focusable: false
+                hasCursor: root.showSettings && root.settingsGroup === 3 && root.settingsOption === index
                 active: Number(root.settings.skinTone) === index
                 onClicked: root.setSkinTone(index)
               }
             }
           }
 
-          Toggle {
+          Column {
+            id: skinToneColumn
             width: parent.width
-            activeFocusOnTab: false
-            hasCursor: root.showSettings && root.settingsGroup === 4
-            titleSize: Style.font.caption
-            label: "Show all skin tones in emoji grid"
-            description: ""
-            checked: !!root.settings.showAllTones
-            onClicked: root.applySetting("showAllTones", !root.settings.showAllTones)
-          }
-
-          Text {
-            visible: !root.settings.showAllTones
-            text: "Ctrl+T cycles the default tone"
-            color: root.foreground
-            opacity: 0.6
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
+            spacing: Style.space(4)
+            Item {
+              id: skinToneRow
+              width: parent.width
+              height: Math.max(label4.implicitHeight, toggle4.implicitHeight) + Style.space(4)
+              Text {
+                id: label4
+                anchors.left: parent.left
+                anchors.right: toggle4.left
+                anchors.rightMargin: Style.space(8)
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Show all skin tones in emoji grid"
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                elide: Text.ElideRight
+              }
+            ToggleSwitch {
+              id: toggle4
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              checked: !!root.settings.showAllTones
+              hasCursor: root.showSettings && root.settingsGroup === 4
+              cursorRing: hasCursor
+              cursorPad: 0
+              onToggled: root.applySetting("showAllTones", !root.settings.showAllTones)
+            }
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: toggle4.toggled()
+              }
+            }
+            Text {
+              visible: !root.settings.showAllTones
+              text: "Ctrl+T cycles the default tone"
+              color: root.foreground
+              opacity: 0.6
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
           }
 
           PanelSeparator {
@@ -1070,29 +1159,55 @@ Item {
             fontFamily: root.fontFamily
           }
 
-          Toggle {
+          Column {
+            id: genderColumn
             width: parent.width
-            activeFocusOnTab: false
-            hasCursor: root.showSettings && root.settingsGroup === 5
-            titleSize: Style.font.caption
-            label: "Show all genders in emoji grid"
-            description: ""
-            checked: !!root.settings.showAllGenders
-            onClicked: {
-              var showAll = !root.settings.showAllGenders
-              root.settings = root.mergedSettings({ showAllGenders: showAll, mergeGenders: !showAll })
-              root.scheduleSave()
-              root.rebuildDisplay()
+            spacing: Style.space(4)
+            Item {
+              id: genderRow
+              width: parent.width
+              height: Math.max(label5.implicitHeight, toggle5.implicitHeight) + Style.space(4)
+              Text {
+                id: label5
+                anchors.left: parent.left
+                anchors.right: toggle5.left
+                anchors.rightMargin: Style.space(8)
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Show all genders in emoji grid"
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                elide: Text.ElideRight
+              }
+              ToggleSwitch {
+                id: toggle5
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                checked: !!root.settings.showAllGenders
+                hasCursor: root.showSettings && root.settingsGroup === 5
+                cursorRing: hasCursor
+                cursorPad: 0
+                onToggled: {
+                  var showAll = !root.settings.showAllGenders
+                  root.settings = root.mergedSettings({ showAllGenders: showAll, mergeGenders: !showAll })
+                  root.scheduleSave()
+                  root.rebuildDisplay()
+                }
+              }
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: toggle5.toggled()
+              }
             }
-          }
-
-          Text {
-            visible: !!root.settings.mergeGenders
-            text: "Hotkey Ctrl+G swaps the gender · active: " + ["male", "female", "person"][Math.max(0, Math.min(2, Number(root.settings.genderMode) || 0))]
-            color: root.foreground
-            opacity: 0.6
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
+            Text {
+              visible: !!root.settings.mergeGenders
+              text: "Hotkey Ctrl+G swaps the gender · active: " + ["male", "female", "person"][Math.max(0, Math.min(2, Number(root.settings.genderMode) || 0))]
+              color: root.foreground
+              opacity: 0.6
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
           }
 
           PanelSeparator {
@@ -1106,24 +1221,47 @@ Item {
             fontFamily: root.fontFamily
           }
 
-          Toggle {
+          Item {
+            id: recentsRow
             width: parent.width
-            activeFocusOnTab: false
-            hasCursor: root.showSettings && root.settingsGroup === 6
-            titleSize: Style.font.caption
-            label: "Show Recent tab"
-            description: ""
-            checked: !!root.settings.showRecents
-            onClicked: {
-              var show = !root.settings.showRecents
-              root.settings = root.mergedSettings({ showRecents: show })
-              root.scheduleSave()
-              if (!show && root.activeCategory === "recent") root.activeCategory = "all"
-              root.rebuildDisplay()
+            height: Math.max(label6.implicitHeight, toggle6.implicitHeight) + Style.space(4)
+            Text {
+              id: label6
+              anchors.left: parent.left
+              anchors.right: toggle6.left
+              anchors.rightMargin: Style.space(8)
+              anchors.verticalCenter: parent.verticalCenter
+              text: "Show Recent tab"
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              elide: Text.ElideRight
+            }
+            ToggleSwitch {
+              id: toggle6
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              checked: !!root.settings.showRecents
+              hasCursor: root.showSettings && root.settingsGroup === 6
+              cursorRing: hasCursor
+              cursorPad: 0
+              onToggled: {
+                var show = !root.settings.showRecents
+                root.settings = root.mergedSettings({ showRecents: show })
+                root.scheduleSave()
+                if (!show && root.activeCategory === "recent") root.activeCategory = "all"
+                root.rebuildDisplay()
+              }
+            }
+            MouseArea {
+              anchors.fill: parent
+              cursorShape: Qt.PointingHandCursor
+              onClicked: toggle6.toggled()
             }
           }
 
           Button {
+            id: clearButton
             visible: !!root.settings.showRecents
             hasCursor: root.showSettings && root.settingsGroup === 7
             width: parent.width
