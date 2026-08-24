@@ -5,8 +5,7 @@ with category tabs, recents, skin tones, gender variants, and adjustable sizing.
 Designed to adhere to Omarchy conventions — fully keyboard-accessible, Nerd
 Fonts icons for categories, and instant open/close with no lag.
 
-![emoji grid](screenshots/picture/emoji-grid.png)
-![settings](screenshots/picture/settings.png)
+![preview](preview.png)
 
 ## Install
 
