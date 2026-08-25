@@ -6,6 +6,7 @@ Designed to adhere to Omarchy conventions — fully keyboard-accessible, Nerd
 Fonts icons for categories, and instant open/close with no lag.
 
 ![preview](preview.png)
+![settings](screenshots/picture/settings.png)
 
 ## Install
 
